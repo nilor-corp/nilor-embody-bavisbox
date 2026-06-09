@@ -177,3 +177,104 @@ class TestManifestSplit(EmbodyTestCase):
         self.embody_ext._reconstructAboutPage(comp, comp.path)
         about = next((p for p in comp.customPages if p.name == 'About'), None)
         self.assertIsNone(about)
+
+    # =====================================================================
+    # Sidecar must never be tagged / tracked
+    # =====================================================================
+
+    def test_isSidecar_identifies_metatable(self):
+        side = self.sandbox.create(tableDAT, 'side_is')
+        self._redirect_sidecar(side)
+        self.assertTrue(self.embody_ext._isSidecar(side))
+        other = self.sandbox.create(tableDAT, 'not_side')
+        self.assertFalse(self.embody_ext._isSidecar(other))
+
+    def test_applyTag_refuses_sidecar(self):
+        side = self.sandbox.create(tableDAT, 'side_tag')
+        self._redirect_sidecar(side)
+        result = self.embody_ext.applyTagToOperator(side, 'tsv')
+        self.assertFalse(result)
+        self.assertNotIn('tsv', list(side.tags))
+
+    def test_untrackSidecar_strips_tag_and_self_row(self):
+        side = self.sandbox.create(tableDAT, 'side_ut')
+        side.clear()
+        side.appendRow(list(self.embody_ext.SIDECAR_HEADER))
+        side.tags = ['tsv']
+        main = self.sandbox.create(tableDAT, 'main_ut')
+        main.clear()
+        main.appendRow(list(self.embody_ext.MANIFEST_COLS))
+        main.appendRow([side.path, 'table', 'tsv', 'x.tsv'])
+        self.embody.par.Externalizations = main.path
+        self.embody_ext._untrackSidecar(side)
+        self.assertEqual(list(side.tags), [])
+        self.assertIsNone(main[side.path, 0])
+
+    # =====================================================================
+    # Doctor integrity check
+    # =====================================================================
+
+    def _make_main(self, name, headers, rows):
+        tbl = self.sandbox.create(tableDAT, name)
+        tbl.clear()
+        tbl.appendRow(headers)
+        for r in rows:
+            tbl.appendRow(r)
+        self.embody.par.Externalizations = tbl.path
+        return tbl
+
+    def test_doctor_ok_on_clean_manifest(self):
+        self._make_main(
+            'doc_clean', list(self.embody_ext.MANIFEST_COLS),
+            [['/a', 'base', 'tox', 'a.tox'], ['/b', 'text', 'py', 'b.py']])
+        side = self.sandbox.create(tableDAT, 'doc_clean_side')
+        side.clear()
+        side.appendRow(list(self.embody_ext.SIDECAR_HEADER))
+        self._redirect_sidecar(side)
+        res = self.embody_ext.Doctor()
+        # /a, /b have no live op -> orphan warnings, but no hard issues.
+        self.assertTrue(res['ok'], res['issues'])
+        self.assertEqual(res['issues'], [])
+
+    def test_doctor_flags_volatile_and_unsorted(self):
+        self._make_main(
+            'doc_bad',
+            ['path', 'type', 'strategy', 'rel_file_path', 'timestamp'],
+            [['/b', 'base', 'tox', 'b.tox', ''],
+             ['/a', 'base', 'tox', 'a.tox', '']])
+        self._redirect_sidecar(None)
+        res = self.embody_ext.Doctor()
+        self.assertFalse(res['ok'])
+        joined = ' | '.join(res['issues'])
+        self.assertIn('timestamp', joined)
+        self.assertIn('not sorted', joined)
+
+    def test_doctor_flags_sidecar_self_row(self):
+        side = self.sandbox.create(tableDAT, 'doc_self_side')
+        side.clear()
+        side.appendRow(list(self.embody_ext.SIDECAR_HEADER))
+        main = self._make_main(
+            'doc_self', list(self.embody_ext.MANIFEST_COLS), [])
+        main.appendRow([side.path, 'table', 'tsv', 'x.local.tsv'])
+        self._redirect_sidecar(side)
+        res = self.embody_ext.Doctor()
+        self.assertFalse(res['ok'])
+        self.assertTrue(any('self-row' in m for m in res['issues']))
+
+    def test_doctor_fix_repairs_schema_and_order(self):
+        tbl = self._make_main(
+            'doc_fix',
+            ['path', 'type', 'strategy', 'rel_file_path', 'timestamp'],
+            [['/b', 'base', 'tox', 'b.tox', 'x'],
+             ['/a', 'base', 'tox', 'a.tox', 'y']])
+        side = self.sandbox.create(tableDAT, 'doc_fix_side')
+        side.clear()
+        side.appendRow(list(self.embody_ext.SIDECAR_HEADER))
+        self._redirect_sidecar(side)
+        # fix runs first, then re-checks in the same call -> should be clean.
+        res = self.embody_ext.Doctor(fix=True)
+        self.assertTrue(res['ok'], res['issues'])
+        headers = [tbl[0, c].val for c in range(tbl.numCols)]
+        self.assertListEqual(headers, list(self.embody_ext.MANIFEST_COLS))
+        order = [tbl[i, 0].val for i in range(1, tbl.numRows)]
+        self.assertEqual(order, ['/a', '/b'])

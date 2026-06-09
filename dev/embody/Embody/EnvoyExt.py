@@ -5480,6 +5480,7 @@ class EnvoyExt:
             '*.json text eol=lf\n'
             '*.tsv text eol=lf\n'
             '*.xml text eol=lf\n'
+            '*.glsl text eol=lf\n'
             '*.toe binary\n'
             '*.tox binary\n'
         )
@@ -5492,14 +5493,20 @@ class EnvoyExt:
                 existing = gitattr.read_text(encoding='utf-8')
 
             if MARKER in existing:
+                updated = existing
                 # Migrate a managed block that predates the .tdn diff driver.
-                if ('*.tdn text eol=lf diff=tdn' not in existing
-                        and '*.tdn text eol=lf' in existing):
-                    existing = existing.replace(
+                if ('*.tdn text eol=lf diff=tdn' not in updated
+                        and '*.tdn text eol=lf' in updated):
+                    updated = updated.replace(
                         '*.tdn text eol=lf', '*.tdn text eol=lf diff=tdn')
-                    gitattr.write_text(existing, encoding='utf-8')
-                    self._log(
-                        'Migrated .gitattributes: enabled .tdn semantic diff')
+                # Migrate a managed block that predates .glsl normalization.
+                if '*.glsl text eol=lf' not in updated:
+                    updated = updated.replace(
+                        '*.xml text eol=lf\n',
+                        '*.xml text eol=lf\n*.glsl text eol=lf\n')
+                if updated != existing:
+                    gitattr.write_text(updated, encoding='utf-8')
+                    self._log('Migrated .gitattributes (eol/diff rules)')
                 else:
                     self._log('.gitattributes already configured', 'DEBUG')
                 return

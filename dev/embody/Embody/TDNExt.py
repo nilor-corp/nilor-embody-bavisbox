@@ -897,11 +897,24 @@ class TDNExt:
 
 				filepath = self._resolveOutputPath(output_file, root_op)
 				content = TDNExt._compact_json_dumps(tdn)
-				write_result = TDNExt._safe_write_tdn(
-					filepath, content, scan_folder)
-				if not write_result.get('success'):
-					return {'error':
-						f'Safe write failed: {write_result.get("error")}'}
+
+				# Deterministic export: if the on-disk .tdn is semantically
+				# identical (ignoring volatile header keys: build, td_build,
+				# exported_at, source_file, generator), leave the file
+				# byte-for-byte as-is so re-exporting an unchanged network
+				# produces zero git churn. Compare via the just-serialized
+				# JSON so tuples/lists normalize the same as the disk copy.
+				existing_tdn = TDNExt._read_existing_tdn(filepath)
+				unchanged = (
+					existing_tdn is not None
+					and TDNExt._tdn_content_equal(
+						json.loads(content), existing_tdn))
+				if not unchanged:
+					write_result = TDNExt._safe_write_tdn(
+						filepath, content, scan_folder)
+					if not write_result.get('success'):
+						return {'error':
+							f'Safe write failed: {write_result.get("error")}'}
 
 				protected = [filepath]
 				if cleanup_protected:
@@ -918,7 +931,10 @@ class TDNExt:
 					build_num=build_num,
 					touch_build=f'{app.version}.{app.build}')
 				self._log(
-					f'Exported network to {filepath}', 'SUCCESS')
+					f'TDN unchanged, skipped rewrite: {filepath}'
+					if unchanged else
+					f'Exported network to {filepath}',
+					'DEBUG' if unchanged else 'SUCCESS')
 
 				# Warn about locked non-DAT operators whose frozen
 				# content won't survive a TDN round-trip
@@ -1146,13 +1162,23 @@ class TDNExt:
 				base_folder = state['metadata']['project_folder']
 
 				content = TDNExt._compact_json_dumps(tdn)
-				write_result = TDNExt._safe_write_tdn(
-					state['output_file'], content, base_folder)
-				if not write_result.get('success'):
-					state['result'] = {
-						'error': f'Safe write failed: '
-								 f'{write_result.get("error")}'}
-					return
+
+				# Deterministic export: skip the rewrite when the on-disk .tdn
+				# is semantically identical (volatile header keys ignored), so
+				# an unchanged network never churns git. File I/O is fine here.
+				existing_tdn = TDNExt._read_existing_tdn(state['output_file'])
+				unchanged = (
+					existing_tdn is not None
+					and TDNExt._tdn_content_equal(
+						json.loads(content), existing_tdn))
+				if not unchanged:
+					write_result = TDNExt._safe_write_tdn(
+						state['output_file'], content, base_folder)
+					if not write_result.get('success'):
+						state['result'] = {
+							'error': f'Safe write failed: '
+									 f'{write_result.get("error")}'}
+						return
 
 				protected = [state['output_file']] + state.get(
 					'protected_files', [])

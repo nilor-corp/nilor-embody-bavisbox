@@ -3817,3 +3817,44 @@ class TestTDNReconstruction(EmbodyTestCase):
 			f'Operator names changed after round-trip.\n'
 			f'Before: {pre_names}\n'
 			f'After:  {post_names}')
+
+	# =================================================================
+	# Deterministic export (skip rewrite when semantically unchanged)
+	# =================================================================
+
+	def test_content_equal_ignores_volatile_header(self):
+		"""Exports differing only in volatile header keys compare equal,
+		so an unchanged network never rewrites its .tdn (no git churn)."""
+		eq = self.embody.ext.TDN._tdn_content_equal
+		base = {
+			'format': 'tdn', 'version': '1.3',
+			'build': 100, 'td_build': '2023.1', 'source_file': 'A.toe',
+			'generator': 'Embody/5.0.0',
+			'exported_at': '2026-01-01T00:00:00Z',
+			'operators': [{'name': 'a', 'type': 'baseCOMP'}],
+		}
+		other = dict(base)
+		other.update({
+			'build': 999, 'td_build': '2026.9', 'source_file': 'B.toe',
+			'generator': 'Embody/9.9.9',
+			'exported_at': '2099-12-31T23:59:59Z',
+		})
+		self.assertTrue(eq(base, other))
+
+	def test_content_equal_detects_real_change(self):
+		"""A genuine operator change is not treated as equal."""
+		eq = self.embody.ext.TDN._tdn_content_equal
+		a = {'format': 'tdn', 'build': 1,
+			 'operators': [{'name': 'a', 'type': 'baseCOMP'}]}
+		b = {'format': 'tdn', 'build': 1,
+			 'operators': [{'name': 'a', 'type': 'containerCOMP'}]}
+		self.assertFalse(eq(a, b))
+
+	def test_content_equal_detects_added_key(self):
+		"""A new non-volatile top-level key breaks equality both ways."""
+		eq = self.embody.ext.TDN._tdn_content_equal
+		a = {'format': 'tdn', 'operators': []}
+		b = {'format': 'tdn', 'operators': [],
+			 'annotations': [{'name': 'x'}]}
+		self.assertFalse(eq(a, b))
+		self.assertFalse(eq(b, a))

@@ -150,7 +150,6 @@ path	type	strategy	rel_file_path
 /embody/unit_tests/test_sandbox/sandbox_test_custom_parameters5	base	tdn	embody/unit_tests/test_sandbox/sandbox_test_custom_parameters5.tdn
 /embody/unit_tests/test_sandbox/sandbox_test_custom_parameters6	base	tdn	embody/unit_tests/test_sandbox/sandbox_test_custom_parameters6.tdn
 /embody/unit_tests/test_sandbox/sandbox_test_custom_parameters7	base	tdn	embody/unit_tests/test_sandbox/sandbox_test_custom_parameters7.tdn
-/embody/unit_tests/test_sandbox/sandbox_test_custom_parameters8	base	tdn	embody/unit_tests/test_sandbox/sandbox_test_custom_parameters8.tdn
 /embody/unit_tests/test_sandbox/sandbox_test_tdn_reconstruction	base	tdn	embody/unit_tests/test_sandbox/sandbox_test_tdn_reconstruction.tdn
 /embody/unit_tests/test_sandbox/sandbox_test_tdn_reconstruction1	base	tdn	embody/unit_tests/test_sandbox/sandbox_test_tdn_reconstruction1.tdn
 /embody/unit_tests/test_server_lifecycle	text	py	embody/unit_tests/test_server_lifecycle.py

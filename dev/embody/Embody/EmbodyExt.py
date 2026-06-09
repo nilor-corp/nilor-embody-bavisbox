@@ -574,6 +574,38 @@ class EmbodyExt:
         t = self.my.parent().op(self.SIDECAR_NAME)
         return t if (t and t.family == 'DAT') else None
 
+    def _isSidecar(self, oper: OP) -> bool:
+        """True if oper is the volatile-metadata sidecar table.
+
+        The sidecar is engine-managed local state and must never be tagged or
+        tracked, even though it carries a 'file' par like any externalized DAT.
+        """
+        if oper is None:
+            return False
+        meta = self.MetaTable
+        if meta is not None and oper is meta:
+            return True
+        return (oper.name == self.SIDECAR_NAME
+                and oper.parent() is self.my.parent())
+
+    def _untrackSidecar(self, table: Optional[DAT]) -> None:
+        """Keep the sidecar out of the committed manifest.
+
+        A full ExternalizeProject scan tags every DAT with a 'file' par, which
+        would otherwise tag the sidecar and add it as a tracked row. Strip any
+        such tag and drop any stale self-row from the manifest. Idempotent.
+        """
+        if table is None:
+            return
+        if table.tags:
+            table.tags = []
+        main = self.Externalizations
+        if main is not None and main[table.path, 0] is not None:
+            main.deleteRow(table.path)
+            self.Log(
+                f"Removed sidecar self-row '{table.path}' from manifest "
+                f"(sidecar is local-only, never tracked)", "INFO")
+
     def _sidecarRelPath(self) -> str:
         """Relative on-disk path for the sidecar, mirroring the main manifest.
 
@@ -629,6 +661,7 @@ class EmbodyExt:
         if table.numRows < 1:
             table.appendRow(list(self.SIDECAR_HEADER))
         self._configureSidecarSync(table)
+        self._untrackSidecar(table)
         return table
 
     def _configureSidecarSync(self, table: DAT) -> None:
@@ -764,6 +797,104 @@ class EmbodyExt:
         for r in rows:
             table.appendRow(r)
         return True
+
+    def Doctor(self, fix: bool = False) -> dict:
+        """Validate manifest + sidecar integrity; optionally auto-fix.
+
+        Checks the invariants the merge-clean schema relies on:
+          - the tracked manifest header is exactly MANIFEST_COLS (no volatile
+            column leakage, no stray/blank trailing columns)
+          - the sidecar never appears as a tracked manifest row
+          - manifest rows are unique by path and sorted ascending
+          - every manifest row has a path and a rel_file_path
+          - the sidecar header is exactly SIDECAR_HEADER
+
+        Orphan rows (no live operator) and orphan sidecar entries (no matching
+        manifest row) are reported as warnings, not issues -- a not-yet-restored
+        operator on a fresh open is expected.
+
+        Args:
+            fix: when True, repair the auto-fixable problems first (normalize
+                 columns, untrack the sidecar, re-sort) and report what changed.
+
+        Returns:
+            dict {'ok', 'issues', 'warnings', 'fixed'}.
+        """
+        issues, warnings, fixed = [], [], []
+        table = self.Externalizations
+
+        if table is None:
+            issues.append('No externalizations table (par.Externalizations unset)')
+            self.Log('Doctor: no externalizations table', 'ERROR')
+            return {'ok': False, 'issues': issues,
+                    'warnings': warnings, 'fixed': fixed}
+
+        if fix:
+            if self._normalizeManifestColumns():
+                fixed.append('normalized manifest columns')
+            self._untrackSidecar(self.MetaTable)
+            self._sortManifest()
+
+        # Manifest schema
+        headers = [self._cellVal(0, c) for c in range(table.numCols)]
+        if headers != list(self.MANIFEST_COLS):
+            issues.append(
+                f'Manifest header is {headers}, expected '
+                f'{list(self.MANIFEST_COLS)}')
+        for vol in self.META_COLS:
+            if vol in headers:
+                issues.append(
+                    f'Volatile column {vol!r} present in committed manifest')
+
+        # Manifest rows
+        seen, paths = set(), []
+        sidecar = self.MetaTable
+        sidecar_path = sidecar.path if sidecar is not None else None
+        for i in range(1, table.numRows):
+            p = self._cellVal(i, 'path')
+            paths.append(p)
+            if not p:
+                issues.append(f'Row {i} has an empty path')
+                continue
+            if p in seen:
+                issues.append(f'Duplicate manifest row for {p!r}')
+            seen.add(p)
+            if sidecar_path and p == sidecar_path:
+                issues.append(f'Sidecar self-row {p!r} present in manifest')
+            if not self._cellVal(i, 'rel_file_path'):
+                issues.append(f'Row {p!r} missing rel_file_path')
+            if op(p) is None:
+                warnings.append(f'Orphan row {p!r} (no live operator)')
+
+        if paths != sorted(paths, key=str):
+            issues.append('Manifest rows are not sorted ascending by path')
+
+        # Sidecar
+        if sidecar is not None:
+            sh = [sidecar[0, c].val if sidecar[0, c] is not None else ''
+                  for c in range(sidecar.numCols)]
+            if sh != list(self.SIDECAR_HEADER):
+                issues.append(
+                    f'Sidecar header is {sh}, expected '
+                    f'{list(self.SIDECAR_HEADER)}')
+            for i in range(1, sidecar.numRows):
+                sp = sidecar[i, 0].val if sidecar[i, 0] is not None else ''
+                if sp and sp not in seen:
+                    warnings.append(
+                        f'Orphan sidecar entry {sp!r} (no manifest row)')
+
+        ok = not issues
+        self.Log(
+            f"Doctor: {'OK' if ok else f'{len(issues)} issue(s)'}, "
+            f"{len(warnings)} warning(s)"
+            + (f", fixed {len(fixed)}" if fixed else ''),
+            'SUCCESS' if ok else 'WARNING')
+        for msg in issues:
+            self.Log(f'  ISSUE: {msg}', 'WARNING')
+        for msg in warnings:
+            self.Log(f'  warn: {msg}', 'DEBUG')
+        return {'ok': ok, 'issues': issues,
+                'warnings': warnings, 'fixed': fixed}
 
     # ==========================================================================
     # PATH UTILITIES - Cross-Platform Support
@@ -6041,6 +6172,9 @@ class EmbodyExt:
 
     def applyTagToOperator(self, oper: OP, tag: str) -> bool:
         """Apply a tag to an operator. Enforces mutual exclusivity."""
+        # The metadata sidecar is local-only state; never tag/track it.
+        if self._isSidecar(oper):
+            return False
         color = self._getTagColor(oper, tag)
         if color is None:
             return False
@@ -6462,6 +6596,7 @@ class EmbodyExt:
         """Check if operator should be skipped in project externalization."""
         return (
             oper.path in paths_to_exclude or
+            self._isSidecar(oper) or
             self.isReplicant(oper) or
             self.isInsideClone(oper) or
             self.my.ext.TDN._hasExcludeTag(oper) or

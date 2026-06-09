@@ -1,11 +1,11 @@
 {
 	"format": "tdn",
 	"version": "1.4",
-	"build": 309,
-	"generator": "Embody/5.0.437",
+	"build": 310,
+	"generator": "Embody/5.0.439",
 	"td_build": "099.2025.32820",
-	"source_file": "Embody-5.438.toe",
-	"exported_at": "2026-06-09T10:36:16Z",
+	"source_file": "Embody-5.440.toe",
+	"exported_at": "2026-06-09T10:57:25Z",
 	"network_path": "/embody",
 	"options": {
 		"include_dat_content": false,
@@ -958,7 +958,7 @@
 						"startSection": true,
 						"readOnly": true,
 						"help": "Embody version string (read-only).",
-						"value": "5.0.437"
+						"value": "5.0.439"
 					},
 					{
 						"name": "Touchbuild",
@@ -981,7 +981,7 @@
 						"label": "Build Number",
 						"readOnly": true,
 						"help": "Embody build number (read-only). Incremented with each release.",
-						"value": 580
+						"value": 581
 					},
 					{
 						"name": "Github",
@@ -996,7 +996,7 @@
 						"label": "Build Date",
 						"readOnly": true,
 						"help": "Date of this Embody build (read-only).",
-						"value": "2026-06-09 10:36:16 UTC"
+						"value": "2026-06-09 10:57:25 UTC"
 					},
 					{
 						"name": "Help",
@@ -1015,11 +1015,10 @@
 				"expand_order": ["/embody/Embody"],
 				"_start_in_progress": true,
 				"git_status": {
-					"/embody": " M",
-					"/embody/Embody": " M",
-					"/embody/Embody/toolbar": " M",
-					"/embody/Embody/toolbar/tooltip": " M",
-					"/embody/Embody/toolbar/tooltip/text": " M"
+					"/embody/Embody/EmbodyExt": " M",
+					"/embody/Embody/EnvoyExt": " M",
+					"/embody/Embody/TDNExt": " M",
+					"/embody/unit_tests/test_tdn_reconstruction": " M"
 				}
 			},
 			"tdn_ref": "embody/Embody.tdn"
@@ -3478,7 +3477,7 @@
 			"type": "tableDAT",
 			"parameters": {
 				"file": "embody/externalizations.tsv",
-				"rows": 168
+				"rows": 167
 			},
 			"flags": ["viewer"],
 			"position": [-200, 0],
