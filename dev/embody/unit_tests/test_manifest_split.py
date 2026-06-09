@@ -261,6 +261,52 @@ class TestManifestSplit(EmbodyTestCase):
         self.assertFalse(res['ok'])
         self.assertTrue(any('self-row' in m for m in res['issues']))
 
+    def test_doctor_ok_with_embedded_children_no_file(self):
+        """Children embedded in a tracked parent's .tox/.tdn legitimately have
+        an empty rel_file_path -- that must not be flagged as an issue."""
+        self._make_main(
+            'doc_embed', list(self.embody_ext.MANIFEST_COLS),
+            [['/PARENT', 'base', 'tox', 'PARENT.tox'],
+             ['/PARENT/childExt', 'text', 'py', ''],
+             ['/PARENT/execute1', 'execute', 'py', '']])
+        self._redirect_sidecar(None)
+        res = self.embody_ext.Doctor()
+        self.assertTrue(res['ok'], res['issues'])
+        self.assertEqual(res['issues'], [])
+
+    def test_doctor_warns_empty_file_no_ancestor(self):
+        """A top-level row with empty rel_file_path and no tracked ancestor is
+        a soft warning, not a hard issue."""
+        self._make_main(
+            'doc_noanc', list(self.embody_ext.MANIFEST_COLS),
+            [['/Lonely', 'base', 'tox', '']])
+        self._redirect_sidecar(None)
+        res = self.embody_ext.Doctor()
+        self.assertTrue(res['ok'], res['issues'])
+        self.assertTrue(any('empty rel_file_path' in w for w in res['warnings']))
+
+    def test_doctor_fix_prunes_orphan_sidecar(self):
+        """fix=True prunes sidecar rows that have no manifest entry; a plain
+        run only warns about them."""
+        ncols = len(self.embody_ext.SIDECAR_HEADER)
+        self._make_main(
+            'doc_orphan', list(self.embody_ext.MANIFEST_COLS),
+            [['/A', 'base', 'tox', 'A.tox']])
+        side = self.sandbox.create(tableDAT, 'doc_orphan_side')
+        side.clear()
+        side.appendRow(list(self.embody_ext.SIDECAR_HEADER))
+        side.appendRow(['/A'] + [''] * (ncols - 1))
+        side.appendRow(['/B'] + [''] * (ncols - 1))
+        self._redirect_sidecar(side)
+        res = self.embody_ext.Doctor()
+        self.assertTrue(res['ok'], res['issues'])
+        self.assertTrue(any('Orphan sidecar' in w for w in res['warnings']))
+        res2 = self.embody_ext.Doctor(fix=True)
+        self.assertTrue(res2['ok'], res2['issues'])
+        side_paths = [side[r, 0].val for r in range(1, side.numRows)]
+        self.assertIn('/A', side_paths)
+        self.assertNotIn('/B', side_paths)
+
     def test_doctor_fix_repairs_schema_and_order(self):
         tbl = self._make_main(
             'doc_fix',

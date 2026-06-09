@@ -806,12 +806,14 @@ class EmbodyExt:
             column leakage, no stray/blank trailing columns)
           - the sidecar never appears as a tracked manifest row
           - manifest rows are unique by path and sorted ascending
-          - every manifest row has a path and a rel_file_path
+          - every manifest row has a non-empty path
           - the sidecar header is exactly SIDECAR_HEADER
 
-        Orphan rows (no live operator) and orphan sidecar entries (no matching
-        manifest row) are reported as warnings, not issues -- a not-yet-restored
-        operator on a fresh open is expected.
+        Reported as warnings (not issues), since none affect merge safety:
+        orphan rows (no live operator), orphan sidecar entries (no matching
+        manifest row), and rows with an empty rel_file_path that also have no
+        tracked ancestor. An empty rel_file_path is normal for ops embedded in
+        a parent's .tox/.tdn externalization.
 
         Args:
             fix: when True, repair the auto-fixable problems first (normalize
@@ -847,6 +849,9 @@ class EmbodyExt:
                     f'Volatile column {vol!r} present in committed manifest')
 
         # Manifest rows
+        all_paths = {self._cellVal(i, 'path')
+                     for i in range(1, table.numRows)
+                     if self._cellVal(i, 'path')}
         seen, paths = set(), []
         sidecar = self.MetaTable
         sidecar_path = sidecar.path if sidecar is not None else None
@@ -862,7 +867,18 @@ class EmbodyExt:
             if sidecar_path and p == sidecar_path:
                 issues.append(f'Sidecar self-row {p!r} present in manifest')
             if not self._cellVal(i, 'rel_file_path'):
-                issues.append(f'Row {p!r} missing rel_file_path')
+                # Empty file path is normal for ops embedded in a tracked
+                # ancestor's externalization (children inside a .tox/.tdn).
+                # Only worth a soft warning when no tracked ancestor exists,
+                # and never a hard issue -- it does not affect merge safety.
+                parts = p.split('/')
+                has_ancestor = any(
+                    '/'.join(parts[:k]) in all_paths
+                    for k in range(2, len(parts)))
+                if not has_ancestor:
+                    warnings.append(
+                        f'Row {p!r} has empty rel_file_path and no '
+                        f'tracked ancestor')
             if op(p) is None:
                 warnings.append(f'Orphan row {p!r} (no live operator)')
 
@@ -877,9 +893,21 @@ class EmbodyExt:
                 issues.append(
                     f'Sidecar header is {sh}, expected '
                     f'{list(self.SIDECAR_HEADER)}')
+            orphan_rows = []
             for i in range(1, sidecar.numRows):
                 sp = sidecar[i, 0].val if sidecar[i, 0] is not None else ''
                 if sp and sp not in seen:
+                    orphan_rows.append((i, sp))
+            if fix and orphan_rows:
+                # Sidecar is local-only; pruning a row with no manifest entry
+                # loses nothing (a re-tracked op gets a fresh entry).
+                for i, _sp in reversed(orphan_rows):
+                    sidecar.deleteRow(i)
+                fixed.append(
+                    f'pruned {len(orphan_rows)} orphan sidecar '
+                    f'entr{"y" if len(orphan_rows) == 1 else "ies"}')
+            else:
+                for _i, sp in orphan_rows:
                     warnings.append(
                         f'Orphan sidecar entry {sp!r} (no manifest row)')
 
@@ -6116,9 +6144,10 @@ class EmbodyExt:
 
         # Delete in reverse order to preserve row indices
         for i in reversed(rows_to_delete):
-            rel_file = self._cellVal(i, 'rel_file_path')
-            self.Log(f"Removed orphaned child entry: {self._cellVal(i, 'path')}", "INFO")
+            child_path = self._cellVal(i, 'path')
+            self.Log(f"Removed orphaned child entry: {child_path}", "INFO")
             table.deleteRow(i)
+            self._metaDelete(child_path)
 
     def _getTagColor(self, oper, tag):
         """Get appropriate color for tag on operator, or None if invalid."""
@@ -6688,6 +6717,7 @@ class EmbodyExt:
                     and self.normalizePath(self._cellVal(i, 'rel_file_path')) == normalized_path):
                 try:
                     self.Externalizations.deleteRow(i)
+                    self._metaDelete(op_path)
                     self.Log(f"Removed '{op_path}'", "SUCCESS")
                     removed = True
                 except Exception as e:
