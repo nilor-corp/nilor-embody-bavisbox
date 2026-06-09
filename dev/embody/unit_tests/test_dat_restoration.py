@@ -45,13 +45,13 @@ class TestDATRestoration(EmbodyTestCase):
     # --- Helpers ---
 
     def _add_table_entry(self, path, dat_type, strategy, rel_file_path):
-        """Add a row to the externalizations table directly."""
+        """Add a row to the externalizations table directly.
+
+        Tracked manifest is now 4 columns (path/type/strategy/rel_file_path);
+        volatile data lives in the sidecar and isn't needed for restoration.
+        """
         table = self.embody_ext.Externalizations
-        table.appendRow([
-            path, dat_type, strategy, rel_file_path,
-            '2026-01-01 00:00:00 UTC', '', '', '',
-            '0', '0', ''
-        ])
+        table.appendRow([path, dat_type, strategy, rel_file_path])
         self._added_paths.append(path)
 
     def _create_file(self, rel_path, content='# test'):

@@ -20,16 +20,30 @@ class TestUpdateSync(EmbodyTestCase):
     # --- createExternalizationsTable ---
 
     def test_createExternalizationsTable_header_row(self):
-        # Verify the existing table has the right header
+        # The tracked manifest must hold ONLY the 4 merge-friendly columns,
+        # in canonical order. Volatile columns now live in the sidecar.
         table = self.embody_ext.Externalizations
         if table and table.numRows > 0:
             headers = [table[0, i].val for i in range(table.numCols)]
-            self.assertIn('path', headers)
-            self.assertIn('type', headers)
-            self.assertIn('rel_file_path', headers)
-            self.assertIn('timestamp', headers)
-            self.assertIn('dirty', headers)
-            self.assertIn('build', headers)
+            self.assertListEqual(
+                headers, list(self.embody_ext.MANIFEST_COLS),
+                f'Manifest header must be exactly MANIFEST_COLS, got {headers}')
+            # Volatile/cosmetic columns must NOT be in the committed manifest.
+            for vol in self.embody_ext.META_COLS:
+                self.assertNotIn(
+                    vol, headers,
+                    f'Volatile column {vol!r} leaked into committed manifest')
+
+    def test_createExternalizationsTable_no_trailing_columns(self):
+        # Guard against stray/blank trailing columns (e.g. from a partial
+        # file-synced deleteCol) re-appearing in the tracked manifest.
+        table = self.embody_ext.Externalizations
+        if table and table.numRows > 0:
+            self.assertEqual(
+                table.numCols, len(self.embody_ext.MANIFEST_COLS),
+                f'Manifest should have exactly '
+                f'{len(self.embody_ext.MANIFEST_COLS)} columns, '
+                f'got {table.numCols}')
 
     # --- Externalizations property ---
 

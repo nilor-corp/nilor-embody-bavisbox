@@ -5286,7 +5286,8 @@ class TDNExt:
 						is_tdn = table[i, 'type'].val == 'tdn'
 					if is_tdn:
 						try:
-							return int(table[i, 'build'].val)
+							return int(self.ownerComp.ext.Embody._metaGet(
+								root_op.path, 'build'))
 						except (ValueError, TypeError):
 							pass
 		except Exception:
@@ -5344,12 +5345,13 @@ class TDNExt:
 	def _trackTDNExport(self, root_path, file_path, build_num=None, touch_build=None):
 		"""Add/update a TDN entry in the externalizations table."""
 		try:
-			table = self.ownerComp.ext.Embody.Externalizations
+			emb = self.ownerComp.ext.Embody
+			table = emb.Externalizations
 			if not table:
 				return
 
 			from pathlib import Path
-			rel_path = self.ownerComp.ext.Embody.normalizePath(
+			rel_path = emb.normalizePath(
 				str(Path(file_path).relative_to(project.folder)))
 			timestamp = datetime.now(timezone.utc).strftime(
 				'%Y-%m-%d %H:%M:%S UTC')
@@ -5360,6 +5362,13 @@ class TDNExt:
 			# Check for strategy column (new schema)
 			headers = [table[0, c].val for c in range(table.numCols)]
 			has_strategy = 'strategy' in headers
+
+			def _writeMeta(path):
+				# Volatile columns live in the sidecar, keyed by path.
+				emb._metaSet(path, 'timestamp', timestamp)
+				emb._metaSet(path, 'dirty', '')
+				emb._metaSet(path, 'build', build_str)
+				emb._metaSet(path, 'touch_build', tb_str)
 
 			# Update existing row if found -- check strategy='tdn' or type='tdn'
 			for i in range(1, table.numRows):
@@ -5373,22 +5382,14 @@ class TDNExt:
 					is_tdn_row = True
 				if is_tdn_row:
 					table[i, 'rel_file_path'] = rel_path
-					table[i, 'timestamp'] = timestamp
-					table[i, 'dirty'] = ''
-					table[i, 'build'] = build_str
-					table[i, 'touch_build'] = tb_str
+					_writeMeta(root_path)
 					return
 
-			# Add new row (schema-aware)
-			if has_strategy:
-				# Determine COMP type
-				target = op(root_path)
-				comp_type = target.type if target else 'base'
-				table.appendRow([root_path, comp_type, 'tdn', rel_path,
-								 timestamp, '', build_str, tb_str])
-			else:
-				table.appendRow([root_path, 'tdn', rel_path, timestamp,
-								 '', build_str, tb_str])
+			# Add new tracked row (4 columns) + volatile sidecar row.
+			target = op(root_path)
+			comp_type = target.type if target else 'base'
+			table.appendRow([root_path, comp_type, 'tdn', rel_path])
+			_writeMeta(root_path)
 		except Exception as e:
 			self._log(f'Failed to track TDN export: {e}', 'WARNING')
 

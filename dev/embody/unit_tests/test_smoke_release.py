@@ -124,16 +124,24 @@ class TestSmokeRelease(EmbodyTestCase):
         self.assertIsNotNone(table, 'Externalizations table must exist')
 
     def test_externalizations_table_schema(self):
-        """Externalizations table has the expected column headers."""
+        """Committed manifest carries only the stable, merge-friendly columns;
+        volatile data lives in the git-ignored sidecar."""
         table = self.embody_ext.Externalizations
         self.assertIsNotNone(table)
-        expected = [
-            'path', 'type', 'strategy', 'rel_file_path',
-            'timestamp', 'dirty', 'build', 'touch_build'
-        ]
         headers = [table[0, c].val for c in range(table.numCols)]
-        for col in expected:
+        for col in ('path', 'type', 'strategy', 'rel_file_path'):
             self.assertIn(col, headers, f'Missing column: {col}')
+        for col in ('timestamp', 'dirty', 'build', 'touch_build',
+                    'node_x', 'node_y', 'node_color'):
+            self.assertNotIn(col, headers,
+                f'Volatile column {col} must not be in the committed manifest')
+
+        sidecar = self.embody_ext._ensureSidecar()
+        self.assertIsNotNone(sidecar, 'Sidecar table must exist')
+        side_headers = [sidecar[0, c].val for c in range(sidecar.numCols)]
+        for col in ('path', 'timestamp', 'dirty', 'build', 'touch_build',
+                    'node_x', 'node_y', 'node_color'):
+            self.assertIn(col, side_headers, f'Sidecar missing column: {col}')
 
     def test_promoted_methods_exist(self):
         """Key promoted methods are callable on the Embody COMP."""

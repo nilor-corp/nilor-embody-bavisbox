@@ -50,6 +50,21 @@ class EmbodyExt:
         'text_skill_mcp_tools_reference': 'mcp-tools-reference',
     }
 
+    # --- Externalizations manifest split (P0 merge-cleanliness) ---------------
+    # The committed manifest keeps only stable, semantic columns so parallel
+    # branches merge cleanly. All volatile / per-developer columns live in a
+    # git-ignored sidecar table (externalizations.local.tsv) keyed by path.
+    MANIFEST_COLS = ('path', 'type', 'strategy', 'rel_file_path')
+    META_COLS = ('timestamp', 'dirty', 'build', 'touch_build',
+                 'node_x', 'node_y', 'node_color')
+    SIDECAR_HEADER = ('path', 'timestamp', 'dirty', 'build', 'touch_build',
+                      'node_x', 'node_y', 'node_color')
+    # Sibling DAT name + on-disk filename suffix for the sidecar. Resolved by
+    # sibling name (not a custom Embody parameter) so adopting the split needs
+    # no .tox/.toe binary resave.
+    SIDECAR_NAME = 'externalizations_local'
+    SIDECAR_SUFFIX = '.local.tsv'
+
     # Parameters persisted to .embody/config.json across upgrades.
     # Explicit whitelist -- new params default to "not persisted" until added.
     _PERSISTED_PARAMS = frozenset({
@@ -68,7 +83,8 @@ class EmbodyExt:
         'Dattagcolorr', 'Dattagcolorg', 'Dattagcolorb',
         # Behavior
         'Logfolder', 'Logtofile', 'Verbose', 'Print',
-        'Detectduplicatepaths', 'Templatemaster', 'Localtimestamps',
+        'Detectduplicatepaths', 'Templatemaster', 'Clonemasterscontainer',
+        'Localtimestamps',
         # TDN
         'Tdnmode',
         'Embeddatsintdns', 'Embedstorageintdns', 'Tdndatsafety',
@@ -542,6 +558,212 @@ class EmbodyExt:
                     f"empty)", "WARNING")
             return default
         return cell.val
+
+    # ==========================================================================
+    # VOLATILE-METADATA SIDECAR (externalizations.local.tsv)
+    # ==========================================================================
+
+    @property
+    def MetaTable(self) -> Optional[DAT]:
+        """The volatile-metadata sidecar tableDAT, or None if not yet created.
+
+        Read-only accessor: never creates the table (use _ensureSidecar for
+        creation). Resolved by sibling name so it survives Embody upgrades the
+        same way the main externalizations table does.
+        """
+        t = self.my.parent().op(self.SIDECAR_NAME)
+        return t if (t and t.family == 'DAT') else None
+
+    def _sidecarRelPath(self) -> str:
+        """Relative on-disk path for the sidecar, mirroring the main manifest.
+
+        e.g. 'embody/externalizations.tsv' ->
+             'embody/externalizations.local.tsv'
+        """
+        main = self.Externalizations
+        rel = ''
+        if main is not None:
+            try:
+                rel = self.normalizePath(main.par.file.eval())
+            except Exception:
+                rel = ''
+            if not rel:
+                try:
+                    rel = self.getOpPaths(main)[3] or ''
+                except Exception:
+                    rel = ''
+        if not rel:
+            folder = self.ExternalizationsFolder
+            rel = (f'{folder}/externalizations.tsv'
+                   if folder else 'externalizations.tsv')
+        if rel.endswith('.tsv'):
+            rel = rel[:-4] + self.SIDECAR_SUFFIX
+        else:
+            rel = rel + self.SIDECAR_SUFFIX
+        return self.normalizePath(rel)
+
+    def _ensureSidecar(self) -> Optional[DAT]:
+        """Create (if missing) and configure the volatile-metadata sidecar.
+
+        Sibling tableDAT (same survival pattern as the main externalizations
+        table) synced to a git-ignored 'externalizations.local.tsv'. It is
+        intentionally NOT given an Embody externalization tag, so the addition
+        scan never records it as a tracked manifest row.
+        """
+        table = self.MetaTable
+        if table is None:
+            try:
+                table = self.my.parent().create(tableDAT, self.SIDECAR_NAME)
+            except Exception as e:
+                self.Log(f'Failed to create sidecar table: {e}', 'ERROR')
+                return None
+            table.nodeX = self.my.nodeX - 200
+            table.nodeY = self.my.nodeY - 200
+            table.color = (self.my.par.Dattagcolorr,
+                           self.my.par.Dattagcolorg,
+                           self.my.par.Dattagcolorb)
+            table.clear()
+            table.appendRow(list(self.SIDECAR_HEADER))
+            self.Log(f"Created '{self.SIDECAR_NAME}' sidecar tableDAT",
+                     'SUCCESS')
+        if table.numRows < 1:
+            table.appendRow(list(self.SIDECAR_HEADER))
+        self._configureSidecarSync(table)
+        return table
+
+    def _configureSidecarSync(self, table: DAT) -> None:
+        """Point the sidecar at its on-disk file and enable bidirectional sync.
+
+        Guarded so it does not retrigger a disk reload on every call.
+        """
+        rel = self._sidecarRelPath()
+        try:
+            if rel and self.normalizePath(table.par.file.eval()) != rel:
+                table.par.file.readOnly = False
+                table.par.file = rel
+                table.par.file.readOnly = True
+            if not table.par.syncfile.eval():
+                table.par.syncfile = True
+        except Exception as e:
+            self.Log(f'Failed to configure sidecar sync: {e}', 'WARNING')
+
+    def _metaGet(self, path: str, col: str, default: str = '') -> str:
+        """Read a volatile column for an op path from the sidecar.
+
+        Degrades gracefully to ``default`` when the sidecar table, the row, or
+        the cell is missing -- mirroring the old empty-cell behavior so a fresh
+        clone (sidecar git-ignored and absent) behaves exactly like a table
+        with empty volatile cells.
+        """
+        table = self.MetaTable
+        if table is None:
+            return default
+        cell = table[path, col]
+        if cell is None:
+            return default
+        return cell.val
+
+    def _metaSet(self, path: str, col: str, value) -> None:
+        """Write a volatile column for an op path, creating the sidecar row on
+        first write."""
+        table = self._ensureSidecar()
+        if table is None:
+            return
+        if table[path, 0] is None:
+            table.appendRow([path] + [''] * (table.numCols - 1))
+        table[path, col] = value
+
+    def _metaDelete(self, path: str) -> None:
+        """Remove an op's volatile row from the sidecar (used on subtraction)."""
+        table = self.MetaTable
+        if table is None:
+            return
+        if table[path, 0] is not None:
+            table.deleteRow(path)
+
+    def _metaRename(self, old_path: str, new_path: str) -> None:
+        """Repoint a sidecar row from old_path to new_path (rename/move)."""
+        if old_path == new_path:
+            return
+        table = self.MetaTable
+        if table is None:
+            return
+        if table[old_path, 0] is None:
+            return
+        # Drop any stale destination row first to avoid duplicate keys.
+        if table[new_path, 0] is not None:
+            table.deleteRow(new_path)
+        table[old_path, 0] = new_path
+
+    # ==========================================================================
+    # DETERMINISTIC MANIFEST ORDERING
+    # ==========================================================================
+
+    def _sortTableByPath(self, table: Optional[DAT]) -> None:
+        """Stable-sort a manifest-style table's data rows by the 'path' column.
+
+        Header row (index 0) stays first. Plain ascending string sort gives a
+        single canonical total order, so parallel branches write new rows at
+        well-separated, deterministic line positions -> clean git auto-merge.
+        Skips the rewrite entirely when rows are already canonical, to avoid
+        needless disk churn from the synced DAT.
+        """
+        if table is None or table.numRows < 3:
+            return
+        paths = [
+            (table[i, 0].val if table[i, 0] is not None else '')
+            for i in range(1, table.numRows)
+        ]
+        if paths == sorted(paths, key=str):
+            return  # already canonical
+        ncols = table.numCols
+        rows = []
+        for i in range(1, table.numRows):
+            rows.append([
+                (table[i, c].val if table[i, c] is not None else '')
+                for c in range(ncols)
+            ])
+        rows.sort(key=lambda r: str(r[0]))
+        table.clear(keepFirstRow=True)
+        for r in rows:
+            table.appendRow(r)
+
+    def _sortManifest(self) -> None:
+        """Canonicalize on-disk row order for both the tracked manifest and the
+        sidecar. Runs before every point where TD syncs the DATs to disk."""
+        self._sortTableByPath(self.Externalizations)
+        self._sortTableByPath(self.MetaTable)
+
+    def _normalizeManifestColumns(self) -> bool:
+        """Rebuild the tracked manifest to exactly MANIFEST_COLS, keyed by name.
+
+        Self-heals tables left with stray/blank columns. On a file-synced DAT
+        (the live externalizations table), iterative deleteCol() during the
+        volatile-column split only partially shrinks the width and leaves
+        trailing empty columns on disk. This reads the four tracked columns by
+        header name (tolerating any current width/order) and rewrites the table
+        in one clear()+appendRow pass, so the on-disk TSV is exactly four
+        columns. Idempotent: a no-op when the header already matches.
+        """
+        table = self.Externalizations
+        if table is None or table.numRows < 1:
+            return False
+        headers = [self._cellVal(0, c) for c in range(table.numCols)]
+        if headers == list(self.MANIFEST_COLS):
+            return False
+        col_idx = {name: (headers.index(name) if name in headers else -1)
+                   for name in self.MANIFEST_COLS}
+        rows = []
+        for i in range(1, table.numRows):
+            rows.append([
+                self._cellVal(i, col_idx[name]) if col_idx[name] >= 0 else ''
+                for name in self.MANIFEST_COLS
+            ])
+        table.clear()
+        table.appendRow(list(self.MANIFEST_COLS))
+        for r in rows:
+            table.appendRow(r)
+        return True
 
     # ==========================================================================
     # PATH UTILITIES - Cross-Platform Support
@@ -1515,10 +1737,7 @@ class EmbodyExt:
                 self.my.par.Dattagcolorb
             )
             externalizations_dat.clear()
-            externalizations_dat.appendRow([
-                'path', 'type', 'strategy', 'rel_file_path', 'timestamp',
-                'dirty', 'build', 'touch_build'
-            ])
+            externalizations_dat.appendRow(list(self.MANIFEST_COLS))
             externalizations_dat.tags = [self.my.par.Tsvtag.eval()]
             self.Log(f"Created '{table_name}' tableDAT", "SUCCESS")
         else:
@@ -1526,6 +1745,8 @@ class EmbodyExt:
             self.Log(f"Reset '{table_name}' tableDAT", "INFO")
 
         self.my.par.Externalizations.val = externalizations_dat
+        # Volatile/cosmetic data lives in a separate git-ignored sidecar.
+        self._ensureSidecar()
 
     def CreateExternalizationsTable(self) -> None:
         """Recovery/init method: create or reconnect the externalizations table.
@@ -1541,17 +1762,31 @@ class EmbodyExt:
             if existing_sibling and existing_sibling.family == 'DAT':
                 self.my.par.Externalizations.val = existing_sibling
                 self.Log('Re-connected to existing externalizations tableDAT', 'INFO')
-                return
+                externalizations_dat = existing_sibling
         if externalizations_dat:
             self.Log('Externalizations table already exists', 'INFO')
+            # Ensure the sidecar exists/syncs and the schema is split, even on
+            # a plain project open that never triggers UpdateHandler. Both are
+            # idempotent. This runs before restore-on-start (frame 45+) so the
+            # sidecar is loaded from disk in time for position restore.
+            self._ensureSidecar()
+            self._migrateTableSchema()
             return
         self.createExternalizationsTable()
+        self._migrateTableSchema()
 
     def _migrateTableSchema(self) -> None:
         """Migrate externalizations table schema to current version.
 
-        Adds missing columns (strategy, node_x, node_y, node_color),
-        populates them from existing data, and removes legacy rows.
+        Brings legacy tables up to the current split schema:
+          1. Add the strategy column (v5.0.176+) if missing.
+          2. Split volatile/cosmetic columns (timestamp, dirty, build,
+             touch_build, node_x/y/color) out of the committed manifest into
+             the git-ignored sidecar, keyed by path, then drop them from the
+             tracked table.
+
+        Idempotent and safe to run on every project open: it only acts on
+        columns that are still present in the tracked table.
         """
         table = self.Externalizations
         if not table or table.numRows < 1:
@@ -1599,18 +1834,36 @@ class EmbodyExt:
             # Refresh headers after modification
             headers = [self._cellVal(0, c) for c in range(table.numCols)]
 
-        # Migration 2: Add position/color columns (v5.0.189+)
-        if 'node_x' not in headers:
-            table.appendCol('node_x')
-            table.appendCol('node_y')
-            table.appendCol('node_color')
-            table[0, table.numCols - 3] = 'node_x'
-            table[0, table.numCols - 2] = 'node_y'
-            table[0, table.numCols - 1] = 'node_color'
-            migrations.append('node_x/node_y/node_color columns')
+        # Migration 2: Split volatile columns into the git-ignored sidecar.
+        # (Supersedes the older "add node_x/y/color to the tracked table"
+        # migration -- those columns now live exclusively in the sidecar.)
+        volatile_present = [c for c in self.META_COLS if c in headers]
+        if volatile_present:
+            self._ensureSidecar()
+            # Copy each row's volatile data into the sidecar, keyed by path.
+            for i in range(1, table.numRows):
+                p = self._cellVal(i, 'path')
+                if not p:
+                    continue
+                for col in volatile_present:
+                    val = self._cellVal(i, col)
+                    if val != '':
+                        self._metaSet(p, col, val)
+            migrations.append(
+                f'moved {len(volatile_present)} volatile column(s) into '
+                f'{self.SIDECAR_NAME}')
+
+        # Always normalize the tracked manifest to exactly the 4 columns. This
+        # drops the volatile columns just copied out AND self-heals a table
+        # left with stray/blank trailing columns by an earlier partial,
+        # file-synced deleteCol (rebuild-by-name is robust to that).
+        if self._normalizeManifestColumns():
+            if not volatile_present:
+                migrations.append('normalized manifest columns')
+            headers = [self._cellVal(0, c) for c in range(table.numCols)]
 
         if migrations:
-            self.Log(f'Schema migration: added {", ".join(migrations)}', 'SUCCESS')
+            self.Log(f'Schema migration: {", ".join(migrations)}', 'SUCCESS')
 
     @staticmethod
     def _resolveOsLabel(os_name: str, os_version: str, win_build) -> str:
@@ -2389,7 +2642,7 @@ class EmbodyExt:
         # Check for parameter changes on TOX-strategy COMPs
         for comp in self.getExternalizedOps(COMP, strategy='tox'):
             if self.param_tracker.compareParameters(comp):
-                self.Externalizations[comp.path, 'dirty'] = 'Par'
+                self._metaSet(comp.path, 'dirty', 'Par')
                 self.Save(comp.path)
 
         # TDN-strategy COMP dirty detection + export is handled once, below,
@@ -2437,8 +2690,10 @@ class EmbodyExt:
             and self.isOpProcessable(oper)
         ]
 
-        # Process changes
-        additions.sort(key=lambda x: (self.Externalizations.path in x.path, x.path), reverse=True)
+        # Process changes. Processing order no longer affects on-disk row
+        # order -- _sortManifest() below makes the final order canonical
+        # regardless of add path -- so a plain deterministic sort suffices.
+        additions.sort(key=lambda x: x.path)
 
         for oper in additions:
             self.handleAddition(oper)
@@ -2447,6 +2702,10 @@ class EmbodyExt:
 
         # Handle dirty COMPs (TOX + TDN)
         dirties = self.dirtyHandler(True)
+
+        # Canonicalize on-disk order for both the tracked manifest and the
+        # sidecar before TD syncs them to disk -> deterministic, merge-clean.
+        self._sortManifest()
 
         # Report results
         self._reportResults(dirties, additions, subtractions)
@@ -2482,7 +2741,11 @@ class EmbodyExt:
         
         if self.my.par.Detectduplicatepaths:
             self.checkForDuplicates()
-        
+
+        # Final sync point before TD writes the DATs to disk -- keep both the
+        # tracked manifest and the sidecar in canonical path order.
+        self._sortManifest()
+
         self.Debug("Refreshed")
         
         if not me.time.play:
@@ -2702,14 +2965,14 @@ class EmbodyExt:
             if hasattr(oper.par, 'Build'):
                 new_build = oper.par.Build.val + 1
                 oper.par.Build = new_build
-                self.Externalizations[opPath, 'build'] = str(new_build)
+                self._metaSet(opPath, 'build', str(new_build))
 
             if hasattr(oper.par, 'Date'):
                 oper.par.Date.val = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
             if hasattr(oper.par, 'Touchbuild'):
                 oper.par.Touchbuild = app.build
-                self.Externalizations[opPath, 'touch_build'] = app.build
+                self._metaSet(opPath, 'touch_build', app.build)
 
             oper.saveExternalTox()
 
@@ -2720,11 +2983,12 @@ class EmbodyExt:
             else:
                 timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
-            self.Externalizations[opPath, 'timestamp'] = timestamp
+            self._metaSet(opPath, 'timestamp', timestamp)
             self.param_tracker.updateParamStore(oper)
-            self.Externalizations[opPath, 'dirty'] = False
+            self._metaSet(opPath, 'dirty', False)
             # Refresh position/color metadata
             self._updatePositionInTable(oper, opPath)
+            self._sortManifest()
 
             self.Log(f"Saved {opPath}", "SUCCESS")
         except Exception as e:
@@ -2770,14 +3034,14 @@ class EmbodyExt:
             if hasattr(oper.par, 'Build'):
                 new_build = oper.par.Build.val + 1
                 oper.par.Build = new_build
-                self.Externalizations[opPath, 'build'] = str(new_build)
+                self._metaSet(opPath, 'build', str(new_build))
 
             if hasattr(oper.par, 'Date'):
                 oper.par.Date.val = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 
             if hasattr(oper.par, 'Touchbuild'):
                 oper.par.Touchbuild = app.build
-                self.Externalizations[opPath, 'touch_build'] = app.build
+                self._metaSet(opPath, 'touch_build', app.build)
 
             # Export TDN -- protect .tdn files belonging to OTHER tracked
             # TDN COMPs so the stale-file cleanup doesn't delete them.
@@ -2789,11 +3053,12 @@ class EmbodyExt:
 
             if result.get('success'):
                 timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-                self.Externalizations[opPath, 'timestamp'] = timestamp
+                self._metaSet(opPath, 'timestamp', timestamp)
                 self.param_tracker.updateParamStore(oper)
-                self.Externalizations[opPath, 'dirty'] = ''
+                self._metaSet(opPath, 'dirty', '')
                 # Refresh position/color metadata
                 self._updatePositionInTable(oper, opPath)
+                self._sortManifest()
                 # Snapshot the network structure so _isTDNDirty returns False
                 self._storeTDNFingerprint(oper)
                 self.Log(f"Exported TDN for {opPath}", "SUCCESS")
@@ -3411,8 +3676,8 @@ class EmbodyExt:
                 # Preserve 'Par' dirty state when oper.dirty is False --
                 # parameter changes are tracked independently from TD's
                 # native dirty flag and should only be cleared on Save.
-                if dirty or self._cellVal(oper.path, 'dirty') != 'Par':
-                    self.Externalizations[oper.path, 'dirty'] = dirty
+                if dirty or self._metaGet(oper.path, 'dirty') != 'Par':
+                    self._metaSet(oper.path, 'dirty', dirty)
             except Exception as e:
                 self.Log(f"Failed to update dirty state for {oper.path}: {e}", "DEBUG")
             if dirty and update:
@@ -3438,13 +3703,13 @@ class EmbodyExt:
                 dirty = self._isTDNDirty(oper, tdn_paths, exclude_tag)
                 try:
                     if dirty:
-                        self.Externalizations[oper.path, 'dirty'] = 'True'
-                    elif self._cellVal(oper.path, 'dirty'):
+                        self._metaSet(oper.path, 'dirty', 'True')
+                    elif self._metaGet(oper.path, 'dirty'):
                         # Clean now -- clear any stale dirty flag left by a
                         # prior scan (e.g. an edit that was reverted). Without
                         # this the indicator sticks on 'True'/'Par' until a
                         # real SaveTDN runs.
-                        self.Externalizations[oper.path, 'dirty'] = ''
+                        self._metaSet(oper.path, 'dirty', '')
                 except Exception as e:
                     self.Log(f"Failed to update dirty state for {oper.path}: {e}", "DEBUG")
                 if dirty and update:
@@ -3487,7 +3752,7 @@ class EmbodyExt:
             
             if oper.family == 'COMP' and self.param_tracker.compareParameters(oper):
                 param_changes.append(oper.path)
-                self.Externalizations[oper.path, 'dirty'] = 'Par'
+                self._metaSet(oper.path, 'dirty', 'Par')
 
         if dirties or param_changes:
             msgs = []
@@ -3638,14 +3903,11 @@ class EmbodyExt:
         if hasattr(oper.par, 'Build'):
             current_build = oper.par.Build.eval()
         else:
-            for row in range(1, self.Externalizations.numRows):
-                if self._cellVal(row, 'path') == oper.path:
-                    try:
-                        current_build = int(self._cellVal(row, 'build'))
-                    except (ValueError, TypeError) as e:
-                        self.Log(f"Failed to parse build number for {oper.path}: {e}", "DEBUG")
-                        pass
-                    break
+            try:
+                current_build = int(self._metaGet(oper.path, 'build'))
+            except (ValueError, TypeError) as e:
+                self.Log(f"Failed to parse build number for {oper.path}: {e}", "DEBUG")
+                pass
         
         self.setupBuildParameters(oper, build_page, current_build, app.build)
         
@@ -3690,63 +3952,53 @@ class EmbodyExt:
 
     def _addToTable(self, oper, rel_file_path, timestamp, dirty,
                      build_num, touch_build, strategy: str = ''):
-        """Add or update operator entry in externalizations table."""
+        """Add or update operator entry in externalizations table.
+
+        Tracked manifest carries only path/type/strategy/rel_file_path. The
+        volatile columns (timestamp, dirty, build, touch_build, node_*) are
+        written to the git-ignored sidecar keyed by path.
+        """
         normalized_path = self.normalizePath(rel_file_path)
-
-        has_strategy_col = self.Externalizations[0, 'strategy'] is not None
-        has_position_cols = self.Externalizations[0, 'node_x'] is not None
-
-        # Build position/color strings from the operator
-        node_x = str(int(oper.nodeX)) if has_position_cols else ''
-        node_y = str(int(oper.nodeY)) if has_position_cols else ''
-        node_color = ''
-        if has_position_cols:
-            c = oper.color
-            node_color = f'{c[0]:.4f},{c[1]:.4f},{c[2]:.4f}'
 
         # Check if row already exists for this operator + strategy
         for row in range(1, self.Externalizations.numRows):
             if self._cellVal(row, 'path') == oper.path:
-                if has_strategy_col:
-                    row_strategy = self._cellVal(row, 'strategy')
-                    if row_strategy != strategy:
-                        continue
+                row_strategy = self._cellVal(row, 'strategy')
+                if row_strategy != strategy:
+                    continue
                 self.Externalizations[row, 'rel_file_path'] = normalized_path
-                # Update position/color on existing rows too
-                if has_position_cols:
-                    self.Externalizations[row, 'node_x'] = node_x
-                    self.Externalizations[row, 'node_y'] = node_y
-                    self.Externalizations[row, 'node_color'] = node_color
+                self._writeMetaRow(oper, timestamp, dirty, build_num,
+                                   touch_build)
                 return
 
-        # Add new row
-        if has_strategy_col:
-            row_data = [
-                oper.path, oper.type, strategy, normalized_path, timestamp,
-                dirty, build_num, touch_build
-            ]
-            if has_position_cols:
-                row_data.extend([node_x, node_y, node_color])
-            self.Externalizations.appendRow(row_data)
-        else:
-            self.Externalizations.appendRow([
-                oper.path, oper.type, normalized_path, timestamp,
-                dirty, build_num, touch_build
-            ])
+        # Add new tracked row (4 columns) + volatile sidecar row
+        self.Externalizations.appendRow(
+            [oper.path, oper.type, strategy, normalized_path])
+        self._writeMetaRow(oper, timestamp, dirty, build_num, touch_build)
+
+    def _writeMetaRow(self, oper, timestamp, dirty, build_num,
+                       touch_build) -> None:
+        """Write all volatile columns (incl. position/color) for an op to the
+        sidecar."""
+        p = oper.path
+        self._metaSet(p, 'timestamp', timestamp)
+        self._metaSet(p, 'dirty', dirty)
+        self._metaSet(p, 'build', build_num)
+        self._metaSet(p, 'touch_build', touch_build)
+        self._updatePositionInTable(oper, p)
 
     def _updatePositionInTable(self, oper: 'OP', op_path: str) -> None:
-        """Update position/color metadata for an operator in the table."""
-        if self.Externalizations[0, 'node_x'] is None:
-            return
-        self.Externalizations[op_path, 'node_x'] = str(int(oper.nodeX))
-        self.Externalizations[op_path, 'node_y'] = str(int(oper.nodeY))
+        """Update position/color metadata for an operator in the sidecar."""
+        self._metaSet(op_path, 'node_x', str(int(oper.nodeX)))
+        self._metaSet(op_path, 'node_y', str(int(oper.nodeY)))
         c = oper.color
-        self.Externalizations[op_path, 'node_color'] = (
-            f'{c[0]:.4f},{c[1]:.4f},{c[2]:.4f}')
+        self._metaSet(op_path, 'node_color',
+                      f'{c[0]:.4f},{c[1]:.4f},{c[2]:.4f}')
 
     def handleSubtraction(self, oper: OP) -> None:
         """Process removal of an operator from externalization."""
         self.Externalizations.deleteRow(oper.path)
+        self._metaDelete(oper.path)
         if oper.family == 'COMP':
             oper.par.externaltox.readOnly = False
         elif oper.family == 'DAT':
@@ -3782,19 +4034,18 @@ class EmbodyExt:
         Called during TDN reconstruction so About pages appear in TD even
         though they are no longer serialized into .tdn files.
         """
-        build_cell = self.Externalizations[comp_path, 'build']
-        if build_cell is None:
+        build_str = self._metaGet(comp_path, 'build')
+        touch_str = self._metaGet(comp_path, 'touch_build')
+        date_str = self._metaGet(comp_path, 'timestamp')
+        # No volatile metadata at all (e.g. fresh clone with the sidecar
+        # git-ignored and absent) -- skip, same as the old "no build cell" guard.
+        if not build_str and not touch_str and not date_str:
             return
         try:
-            build_num = int(build_cell.val) if hasattr(build_cell, 'val') else int(build_cell)
+            build_num = int(build_str)
         except (ValueError, TypeError):
             build_num = 1
-
-        touch_cell = self.Externalizations[comp_path, 'touch_build']
-        touch_build = (touch_cell.val if hasattr(touch_cell, 'val') else str(touch_cell)) if touch_cell else str(app.build)
-
-        ts_cell = self.Externalizations[comp_path, 'timestamp']
-        date_str = (ts_cell.val if hasattr(ts_cell, 'val') else str(ts_cell)) if ts_cell else ''
+        touch_build = touch_str if touch_str else str(app.build)
 
         build_page = next((p for p in comp.customPages if p.name == 'About'), None)
         if not build_page:
@@ -4014,7 +4265,7 @@ class EmbodyExt:
             last_modified = int(Path(save_file_path).stat().st_mtime)
             last_modified_utc = datetime.utcfromtimestamp(last_modified)
             formatted_time = last_modified_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
-            self.Externalizations[oper.path, 'timestamp'] = formatted_time
+            self._metaSet(oper.path, 'timestamp', formatted_time)
         except FileNotFoundError:
             self.Log(f"File not found for timestamp: {save_file_path}", "WARNING")
         except Exception as e:
@@ -4149,7 +4400,8 @@ class EmbodyExt:
             table[row_index, 'path'] = new_op.path
             table[row_index, 'type'] = new_op.type
             table[row_index, 'rel_file_path'] = self.normalizePath(new_rel_path)
-            table[row_index, 'timestamp'] = timestamp
+            self._metaRename(old_op_path, new_op.path)
+            self._metaSet(new_op.path, 'timestamp', timestamp)
             table.cook(force=True)
 
             # Update fingerprint tracking
@@ -4384,7 +4636,8 @@ class EmbodyExt:
                 if self._cellVal(i, 'path') == old_path:
                     table[i, 'path'] = new_path
                     table[i, 'rel_file_path'] = new_rel
-                    table[i, 'timestamp'] = timestamp
+                    self._metaRename(old_path, new_path)
+                    self._metaSet(new_path, 'timestamp', timestamp)
                     break
 
         table.cook(force=True)
@@ -4632,7 +4885,8 @@ class EmbodyExt:
             self.Externalizations[row_index, 'path'] = new_op.path
             self.Externalizations[row_index, 'type'] = new_op.type
             self.Externalizations[row_index, 'rel_file_path'] = self.normalizePath(new_rel_file_path)
-            self.Externalizations[row_index, 'timestamp'] = timestamp
+            self._metaRename(old_op_path, new_op.path)
+            self._metaSet(new_op.path, 'timestamp', timestamp)
             self._updatePositionInTable(new_op, new_op.path)
             self.Externalizations.cook(force=True)
             self.cleanupDuplicateRows(new_op.path)
@@ -4707,7 +4961,7 @@ class EmbodyExt:
                     type_groups[row_type] = {'indices': [], 'timestamps': []}
                 type_groups[row_type]['indices'].append(i)
                 try:
-                    ts_str = self._cellVal(i, 'timestamp')
+                    ts_str = self._metaGet(path, 'timestamp')
                     timestamp = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S UTC") if ts_str else datetime.min
                 except (ValueError, TypeError) as e:
                     self.Log(f"Failed to parse timestamp for row {i}: {e}", "DEBUG")
@@ -4750,7 +5004,7 @@ class EmbodyExt:
         for oper in self.root.findChildren(type=COMP, parName='externaltox'):
             if not any(tag in oper.tags for tag in embody_tags):
                 continue
-            if self.isInsideClone(oper) or self.isReplicant(oper):
+            if self._excludedFromPathGroups(oper):
                 continue
             path = self.normalizePath(oper.par.externaltox.eval())
             if path:
@@ -4759,13 +5013,34 @@ class EmbodyExt:
         for oper in self.root.findChildren(type=DAT, parName='file'):
             if not any(tag in oper.tags for tag in embody_tags):
                 continue
-            if self.isInsideClone(oper) or self.isReplicant(oper):
+            if self._excludedFromPathGroups(oper):
                 continue
             path = self.normalizePath(oper.par.file.eval())
             if path:
                 path_groups.setdefault(path, []).append(oper)
 
         return path_groups
+
+    def _excludedFromPathGroups(self, oper: OP) -> bool:
+        """True if oper should be skipped from duplicate-path grouping.
+
+        Operators inside active TD clone hierarchies or replicator outputs
+        are owned by their master/template and are never externalized on
+        their own, so they cannot participate in a duplicate group. Logs
+        the reason at DEBUG (Verbose) -- this is the first place to look
+        when diagnosing whether clone instances are being filtered here
+        (true-clone path) versus falling through into a duplicate group.
+        """
+        inside_clone = self.isInsideClone(oper)
+        replicant = self.isReplicant(oper)
+        if inside_clone or replicant:
+            if self.my.par.Verbose:
+                self.Log(
+                    f"_buildPathGroups excluding {oper.path} "
+                    f"(isInsideClone={inside_clone}, isReplicant={replicant})",
+                    "DEBUG")
+            return True
+        return False
 
     def checkForDuplicates(self) -> None:
         """Check for and handle duplicate external file paths.
@@ -4783,16 +5058,20 @@ class EmbodyExt:
         for path, ops in self._buildPathGroups().items():
             if len(ops) < 2:
                 continue
+            self._logDuplicateGroupDiagnostics(path, ops)
             if any('clone' in o.tags for o in ops):
+                self.Log(
+                    f"Duplicate group '{path}' skipped: a member is already "
+                    f"tagged 'clone'", "DEBUG")
                 continue
-            if self._resolveReplicants(ops):
+            resolver = self._resolveDuplicateGroup(ops)
+            if resolver:
+                self.Log(
+                    f"Duplicate group '{path}' resolved by {resolver}", "DEBUG")
                 continue
-            if self._resolveClonesByCloningAPI(ops):
-                continue
-            if self._resolveDATsInClonedCOMPs(ops):
-                continue
-            if self._resolveByTemplateMarker(ops):
-                continue
+            self.Log(
+                f"Duplicate group '{path}' unresolved -- routing to prompt",
+                "DEBUG")
             unresolved.append((path, ops))
 
         if not unresolved:
@@ -4812,6 +5091,57 @@ class EmbodyExt:
             return
         for path, ops in unresolved:
             self._promptForDuplicateGroup(path, ops)
+
+    def _resolveDuplicateGroup(self, ops: list):
+        """Run the auto-resolvers in priority order for one duplicate group.
+
+        Returns the name of the resolver that claimed the group, or None
+        if none did (the group then falls through to the manual prompt).
+        Ordering matters: native TD clone relationships and replicants are
+        resolved first, then the explicit ``Clonemasterscontainer`` rule
+        (ancestor-container membership), then the ``Templatemaster`` name
+        convention (unique whole-segment name).
+        """
+        if self._resolveReplicants(ops):
+            return '_resolveReplicants'
+        if self._resolveClonesByCloningAPI(ops):
+            return '_resolveClonesByCloningAPI'
+        if self._resolveDATsInClonedCOMPs(ops):
+            return '_resolveDATsInClonedCOMPs'
+        if self._resolveByMastersContainer(ops):
+            return '_resolveByMastersContainer'
+        if self._resolveByTemplateMarker(ops):
+            return '_resolveByTemplateMarker'
+        return None
+
+    def _logDuplicateGroupDiagnostics(self, path: str, ops: list) -> None:
+        """Emit per-operator diagnostics for one duplicate-path group.
+
+        Only surfaces when the Verbose parameter is on (DEBUG level). For
+        each member it prints the TD path, family, par.clone target, and
+        clone/replicant detection state -- enough to tell whether a group
+        is being handled as a native TD clone or is falling through to a
+        name/container rule.
+        """
+        if not self.my.par.Verbose:
+            return
+        self.Log(f"Duplicate group '{path}' has {len(ops)} member(s):", "DEBUG")
+        for o in ops:
+            clone_target = None
+            clone_par = getattr(o.par, 'clone', None)
+            if clone_par is not None:
+                try:
+                    val = clone_par.eval()
+                    clone_target = val.path if hasattr(val, 'path') else val
+                except Exception as e:
+                    clone_target = f"<error: {e}>"
+            self.Log(
+                f"  {o.path} [{o.family}] "
+                f"clone={clone_target!r} "
+                f"isClone={self.isClone(o)} "
+                f"isInsideClone={self.isInsideClone(o)} "
+                f"isReplicant={self.isReplicant(o)}",
+                "DEBUG")
 
     def _resolveClonesByCloningAPI(self, ops: list) -> bool:
         """Try to resolve master/clone using TD's native clone API.
@@ -4941,6 +5271,61 @@ class EmbodyExt:
         self.Log(
             f"Auto-resolved '{master.path}' as master via name convention "
             f"'{marker}' ({clones} clone{'s' if clones != 1 else ''})",
+            "SUCCESS")
+        return True
+
+    def _resolveByMastersContainer(self, ops: list) -> bool:
+        """Auto-resolve a duplicate group using the clone-masters container.
+
+        Reads the ``Clonemasterscontainer`` parameter (an operator path /
+        COMP reference, e.g. ``/TOX_CLONE_MASTERS``). If exactly one
+        operator in the group lives at or beneath that container in the TD
+        network, it is tagged as the master and the rest as clones -- no
+        prompt.
+
+        This expresses the "pooled masters" topology that the
+        ``Templatemaster`` name convention cannot: many distinct clone
+        masters gathered under one shared parent COMP, with their
+        instances scattered elsewhere. The match here is on ancestor-
+        container membership (is the op a descendant of the container?),
+        not on a unique whole-segment name, so it stays correct even
+        though every master shares the same container segment.
+
+        Returns True only when exactly one operator is inside the
+        container. An empty/unset/unresolvable parameter disables the
+        behavior; 0 or 2+ matches are ambiguous and fall through to the
+        prompt so the choice stays unambiguous.
+        """
+        par = getattr(self.my.par, 'Clonemasterscontainer', None)
+        if par is None:
+            # COMP not yet rebuilt from the updated .tdn -- silently skip.
+            return False
+        container = par.eval()
+        # The parameter may resolve to a COMP (OP-style) or a path string;
+        # accept either so the rule works regardless of how it's wired.
+        if isinstance(container, str):
+            container = op(container.strip()) if container.strip() else None
+        if not container:
+            return False
+        container_path = container.path.rstrip('/')
+
+        def _inside(o):
+            return (o.path == container_path
+                    or o.path.startswith(container_path + '/'))
+
+        matches = [o for o in ops if _inside(o)]
+        if len(matches) != 1:
+            return False
+
+        master = matches[0]
+        for o in ops:
+            if o is not master:
+                self._handleDuplicateAsReference(o)
+        clones = len(ops) - 1
+        self.Log(
+            f"Auto-resolved '{master.path}' as master via clone-masters "
+            f"container '{container_path}' "
+            f"({clones} clone{'s' if clones != 1 else ''})",
             "SUCCESS")
         return True
 
@@ -5110,29 +5495,10 @@ class EmbodyExt:
                 build_num = ''
                 touch_build = ''
 
-            has_strategy_col = self.Externalizations[0, 'strategy'] is not None
-            has_position_cols = self.Externalizations[0, 'node_x'] is not None
-
-            node_x = str(int(oper.nodeX)) if has_position_cols else ''
-            node_y = str(int(oper.nodeY)) if has_position_cols else ''
-            node_color = ''
-            if has_position_cols:
-                c = oper.color
-                node_color = f'{c[0]:.4f},{c[1]:.4f},{c[2]:.4f}'
-
-            if has_strategy_col:
-                row_data = [
-                    oper.path, oper.type, strategy, rel_file_path,
-                    timestamp, '', build_num, touch_build
-                ]
-                if has_position_cols:
-                    row_data.extend([node_x, node_y, node_color])
-                self.Externalizations.appendRow(row_data)
-            else:
-                self.Externalizations.appendRow([
-                    oper.path, oper.type, rel_file_path, timestamp,
-                    '', build_num, touch_build
-                ])
+            self.Externalizations.appendRow(
+                [oper.path, oper.type, strategy,
+                 self.normalizePath(rel_file_path)])
+            self._writeMetaRow(oper, timestamp, '', build_num, touch_build)
 
         self.Log(f"Added 'clone' tag to {oper.path}", "SUCCESS")
 
@@ -5708,10 +6074,9 @@ class EmbodyExt:
                 if oper.par.externaltox.eval():
                     rel_file_path = self.normalizePath(oper.par.externaltox.eval())
                     timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-                    self.Externalizations.appendRow([
-                        oper.path, oper.type, 'tox', rel_file_path,
-                        timestamp, oper.dirty, '', ''
-                    ])
+                    self.Externalizations.appendRow(
+                        [oper.path, oper.type, 'tox', rel_file_path])
+                    self._writeMetaRow(oper, timestamp, oper.dirty, '', '')
                     self.Log(f"Added existing TOX externalization to table", "SUCCESS")
             elif oper.family == 'COMP' and tag == self.my.par.Tdntag.val:
                 self._handleTDNAddition(oper)
@@ -7107,31 +7472,26 @@ class EmbodyExt:
         return ''
 
     def _restorePositionFromTable(self, comp: 'OP', comp_path: str) -> None:
-        """Restore an operator's position and color from the externalizations table."""
-        table = self.Externalizations
-        if not table:
-            return
-        # Check if position columns exist
-        if table[0, 'node_x'] is None:
-            return
-        for i in range(1, table.numRows):
-            if self._cellVal(i, 'path') == comp_path:
-                x_val = self._cellVal(i, 'node_x')
-                y_val = self._cellVal(i, 'node_y')
-                if x_val and y_val:
-                    try:
-                        comp.nodeX = int(float(x_val))
-                        comp.nodeY = int(float(y_val))
-                    except (ValueError, TypeError):
-                        pass
-                color_val = self._cellVal(i, 'node_color')
-                if color_val:
-                    try:
-                        r, g, b = [float(c) for c in color_val.split(',')]
-                        comp.color = (r, g, b)
-                    except (ValueError, TypeError):
-                        pass
-                return
+        """Restore an operator's position and color from the sidecar.
+
+        Degrades gracefully (no-op) when the sidecar row or values are absent,
+        e.g. a fresh clone where the git-ignored sidecar was never present.
+        """
+        x_val = self._metaGet(comp_path, 'node_x')
+        y_val = self._metaGet(comp_path, 'node_y')
+        if x_val and y_val:
+            try:
+                comp.nodeX = int(float(x_val))
+                comp.nodeY = int(float(y_val))
+            except (ValueError, TypeError):
+                pass
+        color_val = self._metaGet(comp_path, 'node_color')
+        if color_val:
+            try:
+                r, g, b = [float(c) for c in color_val.split(',')]
+                comp.color = (r, g, b)
+            except (ValueError, TypeError):
+                pass
 
     # ==========================================================================
     # METADATA RECONCILIATION ON START
@@ -7165,7 +7525,7 @@ class EmbodyExt:
             path = self._cellVal(i, 'path')
             strategy = self._cellVal(i, 'strategy') if table[0, 'strategy'] is not None else ''
             rel_file_path = self._cellVal(i, 'rel_file_path')
-            node_color = self._cellVal(i, 'node_color') if table[0, 'node_color'] is not None else ''
+            node_color = self._metaGet(path, 'node_color')
 
             # Skip Embody itself and its descendants
             if path == embody_path or path.startswith(embody_path + '/'):
@@ -7689,7 +8049,7 @@ class EmbodyExt:
         for i in range(1, table.numRows):
             op_path = str(self._cellVal(i, 'path'))
             oper = op(op_path)
-            val = str(self._cellVal(i, 'dirty'))
+            val = str(self._metaGet(op_path, 'dirty'))
             if oper and oper.valid and oper.family == 'COMP':
                 # TDN COMPs: oper.dirty is always True -- trust the table.
                 if self._cellVal(i, 'strategy') == 'tdn':

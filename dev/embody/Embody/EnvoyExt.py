@@ -4236,27 +4236,30 @@ class EnvoyExt:
             if not table:
                 return {'error': 'Externalizations table not found'}
 
+            emb = op.Embody.ext.Embody
             headers = [table[0, c].val for c in range(table.numCols)]
             has_strategy = 'strategy' in headers
             externalizations = []
             for row in range(1, table.numRows):
+                p = table[row, 'path'].val
                 rel = table[row, 'rel_file_path'].val
                 strategy = (table[row, 'strategy'].val if has_strategy
                             else table[row, 'type'].val) or 'tox'
                 try:
-                    abs_path = str(op.Embody.ext.Embody.buildAbsolutePath(
-                        op.Embody.ext.Embody.normalizePath(rel)))
+                    abs_path = str(emb.buildAbsolutePath(
+                        emb.normalizePath(rel)))
                 except Exception:
                     abs_path = rel
                 externalizations.append({
-                    'path': table[row, 'path'].val,
+                    'path': p,
                     'type': table[row, 'type'].val,
                     'strategy': strategy,
                     'file_path': rel,
                     'absolute_path': abs_path,
-                    'timestamp': table[row, 'timestamp'].val,
-                    'dirty': table[row, 'dirty'].val,
-                    'build': table[row, 'build'].val,
+                    # Volatile columns come from the git-ignored sidecar.
+                    'timestamp': emb._metaGet(p, 'timestamp'),
+                    'dirty': emb._metaGet(p, 'dirty'),
+                    'build': emb._metaGet(p, 'build'),
                     # Hint so an agent seeing a dirty TDN row knows the tool
                     # that explains exactly what changed (live vs on-disk).
                     'recommended_tool': 'diff_tdn' if strategy == 'tdn' else None,
@@ -4309,6 +4312,7 @@ class EnvoyExt:
             if not table:
                 return {'error': 'Externalizations table not found'}
 
+            emb = op.Embody.ext.Embody
             headers = [table[0, c].val for c in range(table.numCols)]
             has_strategy = 'strategy' in headers
             # Find the row for this operator
@@ -4318,8 +4322,8 @@ class EnvoyExt:
                     strategy = (table[row, 'strategy'].val if has_strategy
                                 else table[row, 'type'].val) or 'tox'
                     try:
-                        abs_path = str(op.Embody.ext.Embody.buildAbsolutePath(
-                            op.Embody.ext.Embody.normalizePath(rel)))
+                        abs_path = str(emb.buildAbsolutePath(
+                            emb.normalizePath(rel)))
                     except Exception:
                         abs_path = rel
                     return {
@@ -4329,10 +4333,11 @@ class EnvoyExt:
                         'strategy': strategy,
                         'file_path': rel,
                         'absolute_path': abs_path,
-                        'timestamp': table[row, 'timestamp'].val,
-                        'dirty': table[row, 'dirty'].val,
-                        'build': table[row, 'build'].val,
-                        'touch_build': table[row, 'touch_build'].val,
+                        # Volatile columns come from the git-ignored sidecar.
+                        'timestamp': emb._metaGet(op_path, 'timestamp'),
+                        'dirty': emb._metaGet(op_path, 'dirty'),
+                        'build': emb._metaGet(op_path, 'build'),
+                        'touch_build': emb._metaGet(op_path, 'touch_build'),
                         'recommended_tool': ('diff_tdn' if strategy == 'tdn'
                                              else None),
                     }

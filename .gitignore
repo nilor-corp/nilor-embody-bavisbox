@@ -20,6 +20,11 @@ dev/release_testing/*
 extglob.FullName
 
 # Embody / Envoy (auto-managed)
+# Per-developer volatile/cosmetic sidecar for the externalizations manifest
+# (timestamps, build numbers, touch_build, dirty flags, Manager node
+# positions/colors). Must never be committed -- the tracked externalizations.tsv
+# keeps only stable, merge-friendly columns.
+externalizations.local.tsv
 *.lck
 *.heartbeat
 CrashAutoSave*

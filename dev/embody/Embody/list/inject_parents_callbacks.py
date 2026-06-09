@@ -32,9 +32,17 @@ def onCook(scriptOp):
 	data_rows = {}
 	comp_paths = set()
 
+	# Volatile/cosmetic columns (timestamp, dirty, build, touch_build) now
+	# live in the git-ignored sidecar, not the tracked manifest. Enrich each
+	# row from the sidecar so the Manager list still shows dirty state, build
+	# numbers, and timestamps. Missing sidecar -> empty values (graceful).
+	emb = parent.Embody.ext.Embody
 	for i in range(1, inp.numRows):
 		row = {h: inp[i, j].val for j, h in enumerate(in_headers)}
 		path = row['path']
+		for col in ('timestamp', 'dirty', 'build', 'touch_build'):
+			if not row.get(col):
+				row[col] = emb._metaGet(path, col)
 		data_rows[path] = row
 		oper = op(path)
 		if oper and oper.family == 'COMP':

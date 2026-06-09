@@ -87,12 +87,12 @@ class TestAncestorRename(EmbodyTestCase):
     # --- Helpers ---
 
     def _add_table_entry(self, path, op_type, strategy, rel_file_path):
-        """Add a row to the externalizations table directly."""
+        """Add a row to the externalizations table directly.
+
+        Tracked manifest is 4 columns now; volatile data lives in the sidecar.
+        """
         table = self.embody_ext.Externalizations
-        table.appendRow([
-            path, op_type, strategy, rel_file_path,
-            '2026-01-01 00:00:00 UTC', '', '', ''
-        ])
+        table.appendRow([path, op_type, strategy, rel_file_path])
         self._added_paths.append(path)
 
     def _create_dir(self, rel_path):
