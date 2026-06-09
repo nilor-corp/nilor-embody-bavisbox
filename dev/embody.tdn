@@ -1,11 +1,11 @@
 {
 	"format": "tdn",
 	"version": "1.4",
-	"build": 307,
-	"generator": "Embody/5.0.435",
+	"build": 311,
+	"generator": "Embody/5.0.438",
 	"td_build": "099.2025.32820",
-	"source_file": "Embody-5.436.toe",
-	"exported_at": "2026-06-07T18:25:45Z",
+	"source_file": "Embody-5.439.toe",
+	"exported_at": "2026-06-09T10:27:54Z",
 	"network_path": "/embody",
 	"options": {
 		"include_dat_content": false,
@@ -16,6 +16,13 @@
 			"size": [160, 130],
 			"color": [0.3, 0.5, 0.9],
 			"tags": ["tdn"]
+		},
+		"tableDAT": {
+			"parameters": {
+				"syncfile": true
+			},
+			"size": [130, 90],
+			"color": [0.9, 0.3, 0.4]
 		},
 		"annotateCOMP": {
 			"parameters": {
@@ -402,6 +409,11 @@
 						"help": "When duplicate external paths are detected, an operator whose path contains a folder/COMP with this exact name is auto-selected as the master (the rest are tagged as clones), with no prompt. Matches only when exactly one operator in the group contains this name. Clear this field to always choose the master manually, or set it to your own naming convention (e.g. '_master')."
 					},
 					{
+						"name": "Clonemasterscontainer",
+						"style": "COMP",
+						"label": "Clone Masters Container"
+					},
+					{
 						"name": "Localtimestamps",
 						"style": "Toggle",
 						"label": "Local Timestamps",
@@ -740,8 +752,7 @@
 						"name": "Envoyenable",
 						"style": "Toggle",
 						"label": "Envoy Enable",
-						"help": "Enables/disables the Envoy MCP server. When enabled, starts an HTTP server that exposes TouchDesigner operations to Claude Code and other MCP clients.",
-						"value": true
+						"help": "Enables/disables the Envoy MCP server. When enabled, starts an HTTP server that exposes TouchDesigner operations to Claude Code and other MCP clients."
 					},
 					{
 						"name": "Envoyport",
@@ -757,7 +768,7 @@
 						"label": "Envoy Status",
 						"readOnly": true,
 						"help": "Current status of the Envoy MCP server (read-only). Shows Running, Stopped, or error information.",
-						"value": "Running on port 9870"
+						"value": "Disabled"
 					}
 				],
 				"Logs": [
@@ -947,7 +958,7 @@
 						"startSection": true,
 						"readOnly": true,
 						"help": "Embody version string (read-only).",
-						"value": "5.0.435"
+						"value": "5.0.438"
 					},
 					{
 						"name": "Touchbuild",
@@ -970,7 +981,7 @@
 						"label": "Build Number",
 						"readOnly": true,
 						"help": "Embody build number (read-only). Incremented with each release.",
-						"value": 578
+						"value": 582
 					},
 					{
 						"name": "Github",
@@ -985,7 +996,7 @@
 						"label": "Build Date",
 						"readOnly": true,
 						"help": "Date of this Embody build (read-only).",
-						"value": "2026-06-07 18:25:45 UTC"
+						"value": "2026-06-09 10:27:54 UTC"
 					},
 					{
 						"name": "Help",
@@ -1001,110 +1012,16 @@
 			"storage": {
 				"claudius_running": false,
 				"_tdn_restore_failures": ["/embody/base1"],
-				"expand_order": ["/embody"],
+				"expand_order": ["/embody/Embody"],
 				"_start_in_progress": true,
 				"git_status": {
-					"/embody/externalizations": " M",
-					"/perform": " M",
-					"/embody/unit_tests/test_tdn_sequences": " M",
-					"/embody/unit_tests/test_tdn_reconstruction": " M",
-					"/embody/unit_tests/test_tdn_palette_catalog": " M",
-					"/embody/unit_tests/test_tdn_helpers": " M",
-					"/embody/unit_tests/test_tdn_file_io": " M",
-					"/embody/unit_tests/test_tdn_export_import": " M",
-					"/embody/unit_tests/test_tdn_crash_safety": " M",
-					"/embody/unit_tests/test_tag_management": " M",
-					"/embody/unit_tests/test_tag_lifecycle": " M",
-					"/embody/unit_tests/test_strategy_handlers": " M",
-					"/embody/unit_tests/test_server_lifecycle": " M",
-					"/embody/unit_tests/test_sandbox": " M",
-					"/embody/unit_tests/test_rename_move_lifecycle": " M",
-					"/embody/unit_tests/test_param_tracker": " M",
-					"/embody/unit_tests/test_mcp_top_capture": " M",
-					"/embody/unit_tests/test_mcp_tdn_tools": " M",
-					"/embody/unit_tests/test_mcp_performance": " M",
-					"/embody/unit_tests/test_mcp_parameters": " M",
-					"/embody/unit_tests/test_mcp_operators": " M",
-					"/embody/unit_tests/test_mcp_flags_position": " M",
-					"/embody/unit_tests/test_mcp_externalization": " M",
-					"/embody/unit_tests/test_mcp_extensions": " M",
-					"/embody/unit_tests/test_mcp_diagnostics": " M",
-					"/embody/unit_tests/test_mcp_dat_content": " M",
-					"/embody/unit_tests/test_mcp_connections": " M",
-					"/embody/unit_tests/test_mcp_code_execution": " M",
-					"/embody/unit_tests/test_mcp_batch": " M",
-					"/embody/unit_tests/test_mcp_annotations": " M",
-					"/embody/unit_tests/test_logging": " M",
-					"/embody/unit_tests/test_file_management": " M",
-					"/embody/unit_tests/test_envoy_thread_comm": " M",
-					"/embody/unit_tests/test_envoy_bridge": " M",
-					"/embody/unit_tests/test_duplicate_handling": " M",
-					"/embody/unit_tests/test_delete_cleanup": " M",
-					"/embody/unit_tests/test_custom_parameters": " M",
-					"/embody/unit_tests/test_crud_operators": " M",
-					"/embody/unit_tests/test_catalog_bootstrap_palette": " M",
-					"/embody/unit_tests/TestRunnerExt": " M",
-					"/embody/unit_tests": " M",
-					"/embody/tdn_tests": " M",
-					"/embody/base_tdn": " M",
-					"/embody/Embody/window_tagging_menu": " M",
-					"/embody/Embody/window_manager": " M",
-					"/embody/Embody/windowHeader/title": " M",
-					"/embody/Embody/windowHeader/button_min": " M",
-					"/embody/Embody/windowHeader/button_max": " M",
-					"/embody/Embody/windowHeader/button_close": " M",
-					"/embody/Embody/windowHeader/WindowHeaderExt": " M",
-					"/embody/Embody/windowHeader": " M",
-					"/embody/Embody/toolbar/tooltip/text": " M",
-					"/embody/Embody/toolbar/tooltip": " M",
-					"/embody/Embody/toolbar/toolbar_config": " M",
-					"/embody/Embody/toolbar/container_right/spacer_pars": " M",
-					"/embody/Embody/toolbar/container_right/pars": " M",
-					"/embody/Embody/toolbar/container_right/filter": " M",
-					"/embody/Embody/toolbar/container_right/close": " M",
-					"/embody/Embody/toolbar/container_right": " M",
-					"/embody/Embody/toolbar/container_left/status": " M",
-					"/embody/Embody/toolbar/container_left/spacer_tdn": " M",
-					"/embody/Embody/toolbar/container_left/spacer_envoy": " M",
-					"/embody/Embody/toolbar/container_left/save_folder": " M",
-					"/embody/Embody/toolbar/container_left/save_comp": " M",
-					"/embody/Embody/toolbar/container_left/refresh": " M",
-					"/embody/Embody/toolbar/container_left/perform": " M",
-					"/embody/Embody/toolbar/container_left/initialize": " M",
-					"/embody/Embody/toolbar/container_left/import_tdn": " M",
-					"/embody/Embody/toolbar/container_left/export_tdn": " M",
-					"/embody/Embody/toolbar/container_left/export_comp_tdn": " M",
-					"/embody/Embody/toolbar/container_left/envoy_toggle": " M",
-					"/embody/Embody/toolbar/container_left/disable": " M",
-					"/embody/Embody/toolbar/container_left": " M",
-					"/embody/Embody/toolbar/ToolbarExt": " M",
-					"/embody/Embody/toolbar": " M",
-					"/embody/Embody/templates/text_tdn_textconv": "??",
-					"/embody/Embody/templates/text_skill_mcp_tools_reference": " M",
-					"/embody/Embody/templates/text_rule_refresh_after_commit": "??",
-					"/embody/Embody/templates/text_envoy_bridge": " M",
-					"/embody/Embody/templates/text_claude": " M",
-					"/embody/Embody/templates": " M",
-					"/embody/Embody/tagger/replicator1": " M",
-					"/embody/Embody/tagger/header/text1": " M",
-					"/embody/Embody/tagger/header": " M",
-					"/embody/Embody/tagger": " M",
-					"/embody/Embody/parexec": " M",
-					"/embody/Embody/palette_catalog": " M",
-					"/embody/Embody/manager": " M",
-					"/embody/Embody/list/list_callbacks": " M",
-					"/embody/Embody/list/list1": " M",
-					"/embody/Embody/list/inject_parents_callbacks": " M",
-					"/embody/Embody/list": " M",
-					"/embody/Embody/help/text_help": " M",
-					"/embody/Embody/help": " M",
-					"/embody/Embody/execute": " M",
-					"/embody/Embody/TDNExt": " M",
-					"/embody/Embody/EnvoyExt": " M",
-					"/embody/Embody/EmbodyExt": " M",
-					"/embody/Embody/CatalogManagerExt": " M",
+					"/embody": " M",
 					"/embody/Embody": " M",
-					"/embody": " M"
+					"/embody/Embody/toolbar": " M",
+					"/embody/Embody/toolbar/tooltip": " M",
+					"/embody/Embody/toolbar/tooltip/text": " M",
+					"/embody/externalizations": " M",
+					"/embody/unit_tests/test_sandbox": " M"
 				}
 			},
 			"tdn_ref": "embody/Embody.tdn"
@@ -3563,14 +3480,10 @@
 			"type": "tableDAT",
 			"parameters": {
 				"file": "embody/externalizations.tsv",
-				"syncfile": true,
-				"rows": 168,
-				"cols": 11
+				"rows": 168
 			},
 			"flags": ["viewer"],
 			"position": [-200, 0],
-			"size": [130, 90],
-			"color": [0.9, 0.3, 0.4],
 			"tags": ["tsv"]
 		},
 		{
@@ -3607,6 +3520,16 @@
 			"position": [-700, -352],
 			"size": [329, 322],
 			"palette_clone": true
+		},
+		{
+			"name": "externalizations_local",
+			"type": "tableDAT",
+			"parameters": {
+				"file": "embody/externalizations.local.tsv",
+				"rows": 7,
+				"cols": 8
+			},
+			"position": [-200, -200]
 		},
 		{
 			"name": "annotation_execute_src_ctrl",

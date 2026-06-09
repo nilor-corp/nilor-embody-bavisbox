@@ -98,7 +98,6 @@ path	type	strategy	rel_file_path
 /embody/base_tdn	base	tdn	embody/base_tdn.tdn
 /embody/execute_src_ctrl	execute	py	embody/execute_src_ctrl.py
 /embody/externalizations	table	tsv	embody/externalizations.tsv
-/embody/externalizations_local	table	tsv	embody/externalizations.local.tsv
 /embody/tdn_tests	base	tdn	embody/tdn_tests.tdn
 /embody/unit_tests	base	tdn	embody/unit_tests.tdn
 /embody/unit_tests/TestRunnerExt	text	py	embody/unit_tests/TestRunnerExt.py
