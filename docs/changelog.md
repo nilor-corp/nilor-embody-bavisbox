@@ -1,5 +1,19 @@
 # Changelog
 
+## v5.0.438
+
+A new **`Clone Masters Container`** duplicate-path resolver for the pooled-masters topology (many clone masters gathered under one shared parent COMP), plus Verbose diagnostics that tell you exactly which resolver claimed each duplicate group.
+
+### Duplicate path resolution
+
+- **Feature: `Clone Masters Container` auto-resolves the pooled-masters topology.** New `Clonemasterscontainer` parameter (a COMP reference) on the Embody COMP. When a group of operators sharing one external path has **exactly one** member at or beneath that container (e.g. `/TOX_CLONE_MASTERS`), it is auto-selected as the master and the rest are tagged `clone` — no dialog. This expresses what the `Template Master Name` convention cannot: the inverse topology of *many* distinct clone masters pooled under one shared parent (`/TOX_CLONE_MASTERS/Surface_Master`, `/TOX_CLONE_MASTERS/basic_scene`, …) with instances scattered elsewhere. The `Templatemaster` rule matches a unique **whole-segment name** (one template, copies elsewhere); this rule matches **ancestor-container membership** (descendant-of-container), so it stays correct even though every master shares the same `TOX_CLONE_MASTERS` segment. Implemented as `_resolveByMastersContainer`, wired into `checkForDuplicates` after the native TD clone/replicant resolvers and ahead of `_resolveByTemplateMarker`. Empty parameter disables it; 0 or 2+ matches are ambiguous and fall through to the prompt. Accepts either a COMP reference or a path string and is persisted across upgrades via `config.json`.
+- **Diagnostics: Verbose now explains every duplicate group.** With the **Verbose** parameter on, `checkForDuplicates` logs (DEBUG) each duplicate group's members with their TD path, family, `par.clone` target, and `isClone` / `isInsideClone` / `isReplicant` state, then names the resolver that claimed the group (or that it was routed to the prompt). `_buildPathGroups` logs each operator it excludes as a clone/replicant. This is the fast path to answering "which resolver is my group actually taking, and why?" — clone instances filtered in `_buildPathGroups` are following the native-clone path; ones that fall through into a group are not. Resolver dispatch was refactored into `_resolveDuplicateGroup` (returns the claiming resolver's name) with the exclusion logic centralized in `_excludedFromPathGroups`.
+
+### Tests & docs
+
+- **Test:** new `TestMastersContainerResolution` in `test_duplicate_handling.py` covers single / deeply-nested / zero / multiple / empty-parameter matches and the end-to-end no-prompt resolution.
+- **Docs:** `Clone Masters Container` documented in [Duplicate Path Handling](embody/externalization.md#duplicate-path-handling) and [Configuration](embody/configuration.md).
+
 ## v5.0.437
 
 A second status axis in the manager -- **git-uncommitted** -- so every externalized file (`.tox`, `.tdn`, AND `.py`/`.glsl`/`.json` scripts) faithfully shows whether it is saved AND committed, plus a `changed` filter keyword, lowercase Strategy labels, and an auto-refresh-after-commit rule.

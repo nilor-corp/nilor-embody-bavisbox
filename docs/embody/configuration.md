@@ -12,6 +12,7 @@ Embody is configured through parameters on the Embody COMP itself. Key parameter
 - **Externalize Full Project** — Pulse to externalize every eligible operator in the project
 - **Detect Duplicate Paths** — Enable/disable duplicate path detection prompts
 - **Template Master Name** — When a duplicate-path group has exactly one operator whose path contains this name, that operator is auto-selected as the master (default `__template__`). Clear it to always choose the master manually, or set your own convention (e.g. `_master`). See [Duplicate Path Handling](externalization.md#duplicate-path-handling).
+- **Clone Masters Container** — A container COMP (e.g. `/TOX_CLONE_MASTERS`) where you pool clone masters. When a duplicate-path group has exactly one operator at or beneath this container, that operator is auto-selected as the master and the rest are tagged as clones. Leave empty to disable. Unlike **Template Master Name** (a unique whole-segment name), this matches ancestor-container membership — for topologies with many distinct masters under one shared parent and instances elsewhere. See [Duplicate Path Handling](externalization.md#duplicate-path-handling).
 - **Open Manager** / **Close Manager** — Toggle the Manager UI
 
 ### Envoy

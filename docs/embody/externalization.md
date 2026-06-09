@@ -33,6 +33,12 @@ When Embody detects multiple operators pointing to the same external file, it gr
 - It only fires when **exactly one** operator in the group matches. Zero or 2+ matches are ambiguous, so Embody falls back to the manual prompt.
 - This is opt-in by convention: if none of your operators are named `__template__`, nothing changes and you keep choosing manually. Set the parameter to your own convention (e.g. `_master`) to use a different name, or clear it to always pick the master by hand.
 
+**Automatic resolution (clone-masters container):** Embody also resolves a group without prompting when exactly one operator lives at or beneath the container COMP set in the **Clone Masters Container** parameter (`Clonemasterscontainer`). That operator is kept as the master and the rest are tagged as clones. This targets the inverse topology of the naming convention: **many** distinct clone masters pooled under one shared parent (e.g. `/TOX_CLONE_MASTERS/Surface_Master`, `/TOX_CLONE_MASTERS/basic_scene`, …) with their instances scattered elsewhere in the network.
+
+- The match is on **ancestor-container membership** (is the operator a descendant of the container?), not on a unique name — so it stays correct even though every master shares the same `TOX_CLONE_MASTERS` segment, which the whole-segment name convention cannot express.
+- It only fires when **exactly one** operator in the group is inside the container. Zero or 2+ matches are ambiguous, so Embody falls back to the manual prompt.
+- Leave the parameter empty to disable. It runs ahead of the **Template Master Name** convention, after the native TD clone / replicant resolvers.
+
 **Manual resolution:** For groups that none of the automatic resolvers handle, Embody shows a single dialog listing all operators that share the path. You select which operator is the **master**; the others receive a `clone` tag.
 
 - Operators in a group usually share a name, so each selection button is labeled by the path segment that **differs** between them (e.g. `1: __template__`, `2: scene_1exalohf`), numbered to match the list in the dialog body.
